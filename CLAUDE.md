@@ -1,7 +1,6 @@
 # CLAUDE.md — energy_grid_research_agent
 
 Multi-framework agentic RAG system for power grid technical document analysis.
-Extends `financial_research_agent` with Agno + LangChain + LangGraph + HITL.
 
 ---
 
@@ -9,18 +8,18 @@ Extends `financial_research_agent` with Agno + LangChain + LangGraph + HITL.
 
 | Layer | Framework | Responsibility |
 |---|---|---|
-| Agent definition | **Agno** | Typed agents, tool registries, instruction prompts, `response_model` |
+| Agent logic | **ollama** (native client) | LLM calls via `ollama.chat()` in each agent module |
 | Retrieval/tools | **LangChain** | Doc loading, chunking, Chroma vector store, `RetrievalQA` |
 | Orchestration | **LangGraph** | `StateGraph`, state transitions, HITL conditional edge |
 
-Do not blur these roles. Agno agents do not know about graph routing. LangGraph does not know about agent internals.
+Do not use `agno` — it chains OpenAI imports even for Ollama models. All agents call `ollama.chat()` directly via `_call_llm()` helpers. LangGraph does not know about agent internals.
 
 ---
 
 ## Key Commands
 
 ```bash
-make setup        # pull Ollama models + uv sync --frozen (one-time)
+make setup        # install uv + ollama, sync deps, pull models (one-time)
 make generate     # generate synthetic grid corpus
 make ingest       # embed + store into Chroma via LangChain
 make research     # single query via CLI (Rich output)
@@ -28,8 +27,8 @@ make serve        # async FastAPI on localhost:8000
 make stream       # demo SSE streaming endpoint
 make hitl         # interactive HITL demo
 make eval         # retrieval precision + claim grounding eval
-make smoke        # fast e2e smoke test (1 doc, 20 chunks, mock HITL)
-make test-unit    # pytest tests/unit/
+make smoke        # fast e2e smoke test (mocked LLM, no live Ollama needed)
+make test-unit    # pytest tests/unit/ with ≥80% coverage
 make test-integ   # pytest tests/integration/ (requires live Ollama)
 make lint         # ruff format + ruff check + ty check
 make clean        # remove data/corpus/, data/chroma/, mlruns/
@@ -43,6 +42,7 @@ make clean        # remove data/corpus/, data/chroma/, mlruns/
 - **Embeddings**: `nomic-embed-text` (~300 MB RAM)
 - Total budget: ~1.6 GB RAM, ~1.5 GB disk
 - `NetworkGuard` (`src/.../network_guard.py`) enforces localhost-only LLM calls
+- No GPU: `CUDA_VISIBLE_DEVICES=` and `OLLAMA_NUM_GPU=0` exported in Makefile
 
 ---
 
@@ -50,33 +50,36 @@ make clean        # remove data/corpus/, data/chroma/, mlruns/
 
 ```
 src/energy_grid_research_agent/
-├── config.py           # Pydantic Settings
-├── network_guard.py    # localhost-only enforcement
+├── config.py           # Pydantic Settings (loaded from config/settings.yaml)
+├── network_guard.py    # localhost-only URL enforcement
 ├── prompts.py          # prompt registry loader (reads config/prompts.yaml)
 ├── corpus/generator.py # synthetic IEC standard + fault report generator
 ├── retrieval/
-│   ├── embedder.py     # OllamaEmbeddings + Chroma
-│   └── chain.py        # RetrievalQA with return_source_documents=True
+│   ├── embedder.py     # OllamaEmbeddings + Chroma (langchain_ollama)
+│   └── chain.py        # RetrievalQA (langchain_classic)
 ├── tools/
 │   ├── registry.py
-│   ├── search.py       # search_grid_documents Agno tool
-│   ├── extract.py      # extract_structured_data Agno tool
-│   └── calculate.py    # calculate_metric Agno tool
+│   ├── search.py       # search_grid_documents tool
+│   ├── extract.py      # extract_structured_data tool
+│   └── calculate.py    # calculate_metric tool
 ├── agents/
-│   ├── decomposer.py   # Agno: query decomposition
-│   ├── retrieval.py    # Agno: document retrieval
-│   ├── extraction.py   # Agno: structured finding extraction
-│   ├── synthesis.py    # Agno: report synthesis
-│   └── validation.py   # Agno: claim grounding validation
+│   ├── decomposer.py   # query decomposition via ollama.chat()
+│   ├── retrieval.py    # document retrieval (wraps search tool)
+│   ├── extraction.py   # structured finding extraction via ollama.chat()
+│   ├── synthesis.py    # report synthesis via ollama.chat()
+│   └── validation.py   # claim grounding validation via ollama.chat()
 ├── graph.py            # LangGraph StateGraph + HITL node
 ├── report.py           # ResearchReport + ComplianceArtefact Pydantic models
 └── serve.py            # Async FastAPI: /research (SSE) + /research/sync
 config/
 ├── settings.yaml
 └── prompts.yaml        # versioned prompt registry (version logged per response)
+tests/
+├── unit/               # 112 tests, ~90% coverage, no live Ollama needed
+└── integration/        # corpus + full pipeline tests (requires live Ollama)
 data/
-├── corpus/             # synthetic grid documents
-└── chroma/             # Chroma persist directory
+├── corpus/             # synthetic grid documents (git-ignored)
+└── chroma/             # Chroma persist directory (git-ignored)
 ```
 
 ---
@@ -101,11 +104,13 @@ class AgentState(TypedDict):
     requires_human_review: bool   # set by extraction agent
     human_approved: bool          # set by HITL node
     agent_calls: int
+    validation_attempts: int      # capped at 3; prevents infinite synthesis loop
 ```
 
 Graph flow: `decompose → retrieve → extract → hitl → synthesise → validate`
-HITL gate: if `requires_human_review` (confidence < 0.6) → prompt human; else pass through.
-Validation loop: if `validation_passed` is False → re-enter `synthesise`.
+
+- **HITL gate**: if `requires_human_review` (confidence < 0.6) → prompt human; else auto-approve.
+- **Validation loop**: if `validation_passed` is False → re-enter `synthesise`, max **3 attempts** then exit.
 
 ---
 
@@ -120,11 +125,11 @@ Validation loop: if `validation_passed` is False → re-enter `synthesise`.
 ## Engineering Conventions
 
 - **Package manager**: `uv` with frozen `uv.lock` — never `pip install` directly
-- **Typing**: fully typed Python, checked with `ty` (Astral)
-- **Testing**: HITL mocked in unit tests; integration tests require live Ollama
+- **Typing**: fully typed Python, checked with `ty` (Astral); `unresolved-import = "warn"` for langchain stubs
+- **Testing**: 112 unit tests, ~90% coverage; HITL and LLM mocked via `patch("...._call_llm")`; integration tests use `--mock-hitl` flag or live Ollama
 - **CI**: GitHub Actions — lint + unit tests on every push
 - **HITL async**: `asyncio.to_thread` wraps blocking `input()` in async context
-- **Streaming**: node-level SSE (fast), not token-level (avoids slow LLM streaming)
+- **Streaming**: node-level SSE (fast), not token-level
 - **Chroma over FAISS**: chosen for LangChain integration fit, not raw speed
 
 ---
@@ -132,10 +137,13 @@ Validation loop: if `validation_passed` is False → re-enter `synthesise`.
 ## Key Dependencies
 
 ```toml
-agno>=1.0
+ollama>=0.3
 langchain>=0.2
+langchain-classic>=1.0      # RetrievalQA
 langchain-community>=0.2
+langchain-ollama>=0.1       # OllamaEmbeddings, OllamaLLM
 langchain-chroma>=0.1
+langchain-text-splitters>=0.1
 langgraph>=0.2
 chromadb>=0.5
 pdfplumber>=0.11
@@ -148,7 +156,7 @@ rich>=13.7
 loguru>=0.7
 numpy>=1.26
 # dev
-pytest>=8.0, pytest-asyncio>=0.23, ruff>=0.4, ty>=0.0.1a6
+pytest>=8.0, pytest-asyncio>=0.23, pytest-cov>=5.0, ruff>=0.4, ty>=0.0.1a6
 ```
 
 ---

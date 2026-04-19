@@ -7,10 +7,13 @@ license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 
 dependencies = [
-    "agno>=1.0",
+    "ollama>=0.3",
     "langchain>=0.2",
+    "langchain-classic>=1.0",
     "langchain-community>=0.2",
+    "langchain-ollama>=0.1",
     "langchain-chroma>=0.1",
+    "langchain-text-splitters>=0.1",
     "langgraph>=0.2",
     "chromadb>=0.5",
     "pdfplumber>=0.11",
@@ -28,6 +31,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
     "ruff>=0.4",
     "ty>=0.0.1a6",
 ]
@@ -55,5 +59,32 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-ra -q"
 
+[tool.coverage.run]
+source = ["src/energy_grid_research_agent"]
+omit = [
+    "*/retrieval/embedder.py",   # requires live Ollama
+    "*/retrieval/chain.py",      # requires live Ollama + Chroma
+    "*/corpus/generator.py",     # tested by integration tests
+    "*/serve.py",                # tested by integration tests
+    "*/__main__.py",             # tested by integration tests
+    "*/eval.py",                 # tested by integration tests
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
 [tool.ty]
-python-version = "3.11"
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+unresolved-import = "warn"
+
+[tool.uv]
+# CPU-only — no CUDA index, no GPU wheels
+index-strategy = "first-index"
+# Exclude GPU-specific extras pulled by transitive deps
+constraint-dependencies = [
+    "torch>=0.0.0 ; sys_platform == 'never'",
+]

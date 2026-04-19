@@ -1,2 +1,115 @@
 # energy_grid_research_agent
-Multi-Framework Agentic RAG System for Industrial Technical Document Analysis
+
+Multi-framework agentic RAG system for power grid technical document analysis. Analyses IEC standards and fault reports to produce structured compliance artefacts with Human-in-the-Loop review.
+
+## Architecture
+
+| Layer | Framework | Role |
+|---|---|---|
+| Agent logic | **ollama** (native `ollama.chat()`) | LLM calls — decompose, extract, synthesise, validate |
+| Retrieval | **LangChain** | Chroma vector store, `RetrievalQA`, doc chunking |
+| Orchestration | **LangGraph** | 6-node `StateGraph`, HITL conditional edge, validation retry loop |
+| API | **FastAPI** | SSE streaming + sync endpoints |
+
+All LLM inference is **localhost-only** via `qwen2.5:1.5b` on Ollama. No GPU required. No external API calls.
+
+## Graph Flow
+
+```
+decompose → retrieve → extract → [HITL gate] → synthesise → validate
+                                                     ↑____________| (max 3 retries)
+```
+
+- **HITL gate**: findings with confidence < 0.6 prompt a human `[y/n]` before synthesis.
+- **Validation loop**: if `validation_passed=False`, re-synthesises up to 3 times then exits.
+
+## Quick Start
+
+```bash
+# 1. One-time setup (installs uv, ollama, pulls models)
+make setup
+
+# 2. Generate synthetic corpus + ingest into Chroma
+make generate
+make ingest
+
+# 3. Run a research query
+make research
+```
+
+## Commands
+
+| Command | When to run |
+|---|---|
+| `make setup` | Once, after clone |
+| `make generate` | After `make clean` or first time |
+| `make ingest` | After `make generate` |
+| `make research` | Query the pipeline interactively |
+| `make serve` | Start FastAPI server on :8000 |
+| `make smoke` | Fast CI check — mocked LLM, no Ollama needed |
+| `make test-unit` | Unit tests with coverage report |
+| `make test-integ` | Full pipeline test — requires live Ollama |
+| `make lint` | ruff + ty type check |
+| `make clean` | Remove corpus and vector store |
+
+## Output
+
+Every query produces a `ResearchReport`:
+
+```json
+{
+  "query": "What are IEC 61850 GOOSE timing requirements?",
+  "summary": "GOOSE messages must complete transfer within 4 ms...",
+  "findings": [...],
+  "compliance_artefacts": [...],
+  "validation_passed": true,
+  "requires_human_review": false,
+  "prompt_version": "v1.0"
+}
+```
+
+## API
+
+```bash
+# Streaming SSE
+curl -X POST http://localhost:8000/research \
+  -H "Content-Type: application/json" \
+  -d '{"query": "IEC 61850 GOOSE requirements"}'
+
+# Sync
+curl -X POST http://localhost:8000/research/sync \
+  -H "Content-Type: application/json" \
+  -d '{"query": "fault clearance time zone 1"}'
+
+# Health
+curl http://localhost:8000/health
+```
+
+## Models
+
+- **LLM**: `qwen2.5:1.5b` — ~935 MB RAM
+- **Embeddings**: `nomic-embed-text` — ~274 MB RAM
+- Total: ~1.6 GB RAM, ~1.5 GB disk
+
+## Testing
+
+```bash
+make test-unit    # 112 unit tests, ~90% coverage, no Ollama needed
+make smoke        # 2 integration tests, mocked LLM
+make test-integ   # full pipeline against live Ollama
+```
+
+## Development
+
+```bash
+make lint         # ruff format + ruff check --fix + ty check
+uv add <pkg>      # add dependency (updates uv.lock)
+uv sync --frozen --extra dev  # sync after pulling
+```
+
+## Requirements
+
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/) (auto-installed by `make setup`)
+- [Ollama](https://ollama.com/) (auto-installed by `make setup`)
+- ~2 GB free RAM, ~2 GB disk

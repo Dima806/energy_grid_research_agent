@@ -1,0 +1,21 @@
+ollama:
+  base_url: "http://127.0.0.1:11434"
+  llm_model: "qwen2.5:1.5b"
+  embed_model: "nomic-embed-text"
+
+retrieval:
+  top_k: 4
+  chunk_size: 512
+  chunk_overlap: 64
+
+confidence:
+  hitl_threshold: 0.6
+
+chroma:
+  persist_dir: "data/chroma"
+  collection_name: "grid_docs"
+
+corpus:
+  output_dir: "data/corpus"
+  num_standards: 5
+  num_fault_reports: 5

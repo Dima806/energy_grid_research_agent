@@ -208,3 +208,10 @@ __marimo__/
 
 # .llm
 .llm/
+
+# Generated data — corpus documents, Chroma vector store, MLflow runs
+data/corpus/
+data/chroma/
+mlruns/
+htmlcov/
+.coverage
