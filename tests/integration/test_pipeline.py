@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
 
 def test_smoke_corpus_generation(tmp_path) -> None:
     from energy_grid_research_agent.corpus.generator import generate_corpus

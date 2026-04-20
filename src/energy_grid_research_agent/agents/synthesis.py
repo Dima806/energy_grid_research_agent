@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import time
 from typing import Any
 
 from loguru import logger
@@ -15,11 +16,15 @@ def _call_llm(prompt: str) -> str:
     import ollama
 
     settings = get_settings()
+    model = settings.ollama.llm_model
+    logger.debug("[synthesis] llm start | model={} | chars={}", model, len(prompt))
+    t0 = time.perf_counter()
     response = ollama.chat(
-        model=settings.ollama.llm_model,
+        model=model,
         messages=[{"role": "user", "content": prompt}],
         options={"temperature": 0.1},
     )
+    logger.debug("[synthesis] llm done | elapsed={:.2f}s", time.perf_counter() - t0)
     return str(response.message.content)
 
 
