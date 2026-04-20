@@ -20,7 +20,7 @@ decompose → retrieve → extract → [HITL gate] → synthesise → validate
                                                      ↑____________| (max 3 retries)
 ```
 
-- **HITL gate**: findings with confidence < 0.6 prompt a human `[y/n]` before synthesis.
+- **HITL gate**: findings with confidence < 0.6 display each flagged finding (category, description, source, confidence score) then prompt `[y/n]` before synthesis.
 - **Validation loop**: if `validation_passed=False`, re-synthesises up to 3 times then exits.
 
 ## Quick Start
@@ -44,11 +44,11 @@ make research
 | `make setup` | Once, after clone |
 | `make generate` | After `make clean` or first time |
 | `make ingest` | After `make generate` |
-| `make research` | Query the pipeline interactively |
-| `make serve` | Start FastAPI server on :8000 |
+| `make research` | Query the pipeline interactively (auto-starts Ollama) |
+| `make serve` | Start FastAPI server on :8000 (auto-starts Ollama) |
 | `make smoke` | Fast CI check — mocked LLM, no Ollama needed |
 | `make test-unit` | Unit tests with coverage report |
-| `make test-integ` | Full pipeline test — requires live Ollama |
+| `make test-integ` | Full pipeline test (auto-starts Ollama) |
 | `make lint` | ruff + ty type check |
 | `make clean` | Remove corpus and vector store |
 
@@ -96,8 +96,30 @@ curl http://localhost:8000/health
 ```bash
 make test-unit    # 112 unit tests, ~90% coverage, no Ollama needed
 make smoke        # 2 integration tests, mocked LLM
-make test-integ   # full pipeline against live Ollama
+make test-integ   # full pipeline against live Ollama (auto-started if needed)
 ```
+
+If Ollama is unreachable and `--mock-hitl` is not passed, integration tests skip with a clear message rather than failing.
+
+## Logging
+
+Every graph node emits `INFO` logs with elapsed time:
+
+```
+2026-04-20 12:00:01 | INFO | [decompose] start | query='What are IEC 61850...'
+2026-04-20 12:00:03 | INFO | [decompose] done | subtasks=3 | elapsed=2.33s
+2026-04-20 12:00:03 | INFO | [retrieve] start | subtasks=3
+2026-04-20 12:00:04 | INFO | [retrieve] done | chunks=12 | elapsed=0.43s
+2026-04-20 12:00:04 | INFO | [extract] start | chunks=12
+2026-04-20 12:00:10 | INFO | [extract] done | findings=4 | needs_review=False | elapsed=5.81s
+2026-04-20 12:00:10 | INFO | [hitl] auto-approved (confidence ok)
+2026-04-20 12:00:10 | INFO | [synthesise] start | findings=4
+2026-04-20 12:00:14 | INFO | [synthesise] done | artefacts=4 | elapsed=3.92s
+2026-04-20 12:00:14 | INFO | [validate] start | attempt=1/3
+2026-04-20 12:00:17 | INFO | [validate] done | passed=True | elapsed=3.11s
+```
+
+Set `LOGURU_LEVEL=DEBUG` to also see per-LLM-call timings (model, prompt size, duration).
 
 ## Development
 

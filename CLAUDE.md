@@ -22,14 +22,14 @@ Do not use `agno` — it chains OpenAI imports even for Ollama models. All agent
 make setup        # install uv + ollama, sync deps, pull models (one-time)
 make generate     # generate synthetic grid corpus
 make ingest       # embed + store into Chroma via LangChain
-make research     # single query via CLI (Rich output)
-make serve        # async FastAPI on localhost:8000
+make research     # single query via CLI (Rich output); auto-starts Ollama
+make serve        # async FastAPI on localhost:8000; auto-starts Ollama
 make stream       # demo SSE streaming endpoint
-make hitl         # interactive HITL demo
-make eval         # retrieval precision + claim grounding eval
+make hitl         # interactive HITL demo; auto-starts Ollama
+make eval         # retrieval precision + claim grounding eval; auto-starts Ollama
 make smoke        # fast e2e smoke test (mocked LLM, no live Ollama needed)
 make test-unit    # pytest tests/unit/ with ≥80% coverage
-make test-integ   # pytest tests/integration/ (requires live Ollama)
+make test-integ   # pytest tests/integration/; auto-starts Ollama if needed
 make lint         # ruff format + ruff check + ty check
 make clean        # remove data/corpus/, data/chroma/, mlruns/
 ```
@@ -109,7 +109,7 @@ class AgentState(TypedDict):
 
 Graph flow: `decompose → retrieve → extract → hitl → synthesise → validate`
 
-- **HITL gate**: if `requires_human_review` (confidence < 0.6) → prompt human; else auto-approve.
+- **HITL gate**: if `requires_human_review` (confidence < 0.6) → display each flagged finding (category, description, source, confidence) then prompt `[y/n]`; else auto-approve.
 - **Validation loop**: if `validation_passed` is False → re-enter `synthesise`, max **3 attempts** then exit.
 
 ---
@@ -126,8 +126,10 @@ Graph flow: `decompose → retrieve → extract → hitl → synthesise → vali
 
 - **Package manager**: `uv` with frozen `uv.lock` — never `pip install` directly
 - **Typing**: fully typed Python, checked with `ty` (Astral); `unresolved-import = "warn"` for langchain stubs
-- **Testing**: 112 unit tests, ~90% coverage; HITL and LLM mocked via `patch("...._call_llm")`; integration tests use `--mock-hitl` flag or live Ollama
+- **Testing**: 112 unit tests, ~90% coverage; HITL and LLM mocked via `patch("...._call_llm")`; integration tests use `--mock-hitl` flag or live Ollama; `require_ollama` session fixture skips live tests if server unreachable
 - **CI**: GitHub Actions — lint + unit tests on every push
+- **Ollama auto-start**: `_ensure-ollama` Makefile target polls `http://127.0.0.1:11434/` and starts `ollama serve` if needed; used by `research`, `serve`, `hitl`, `eval`, `test-integ`
+- **Logging**: `logger.info` at each graph node entry/exit with elapsed time; `logger.debug` logs each `_call_llm` start/end with model name, prompt char count, and duration
 - **HITL async**: `asyncio.to_thread` wraps blocking `input()` in async context
 - **Streaming**: node-level SSE (fast), not token-level
 - **Chroma over FAISS**: chosen for LangChain integration fit, not raw speed
