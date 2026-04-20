@@ -1,5 +1,5 @@
 .PHONY: setup generate ingest research serve stream hitl eval smoke \
-        test-unit test-integ lint clean
+        test-unit test-integ lint clean _ensure-ollama
 
 # ── Variables ─────────────────────────────────────────────────────────────────
 
@@ -71,10 +71,10 @@ ingest:
 #    hitl     → interactive query that prompts for human approval if confidence < 0.6
 # =============================================================================
 
-research:
+research: _ensure-ollama
 	$(PYTHON) -m $(APP_MODULE) --query $(QUERY)
 
-serve:
+serve: _ensure-ollama
 	uv run uvicorn $(APP_MODULE).serve:app \
 		--host 127.0.0.1 --port $(PORT) --reload
 
@@ -84,7 +84,7 @@ stream:
 		-d '{"query": $(QUERY), "session_id": "$(SESSION_ID)"}' \
 		--no-buffer
 
-hitl:
+hitl: _ensure-ollama
 	$(PYTHON) -m $(APP_MODULE) --query $(QUERY) --hitl
 
 # =============================================================================
@@ -93,7 +93,7 @@ hitl:
 #    Run after ingesting new corpus or changing prompts/models.
 # =============================================================================
 
-eval:
+eval: _ensure-ollama
 	$(PYTHON) -m $(APP_MODULE).eval
 
 # =============================================================================
@@ -110,8 +110,16 @@ test-unit:
 		--cov-report=html:htmlcov \
 		--cov-fail-under=80
 
-test-integ:
+test-integ: _ensure-ollama
 	$(PYTEST) tests/integration/ -v
+
+_ensure-ollama:
+	@if ! curl -sf http://127.0.0.1:11434/ &>/dev/null; then \
+		echo "Starting Ollama..."; \
+		ollama serve &>/tmp/ollama.log & \
+		until curl -sf http://127.0.0.1:11434/ &>/dev/null; do sleep 1; done; \
+		echo "Ollama ready."; \
+	fi
 
 smoke:
 	$(PYTEST) tests/integration/test_pipeline.py \
