@@ -65,14 +65,36 @@ def extraction_node(state: AgentState) -> dict[str, Any]:
     }
 
 
+def _format_hitl_prompt(state: AgentState) -> str:
+    from energy_grid_research_agent.config import get_settings
+
+    threshold = get_settings().confidence.hitl_threshold
+    flagged = [
+        f
+        for f in state["extracted_findings"]
+        if f.get("confidence", 1.0) < threshold or f.get("requires_human_review", False)
+    ]
+    lines = [
+        f"\nQuery: {state['query']}",
+        f"\nLow-confidence findings requiring review (threshold={threshold}):",
+    ]
+    for i, f in enumerate(flagged, 1):
+        lines.append(
+            f"  {i}. [{f.get('category', '?')}] {f.get('description', '')[:120]}"
+            f"\n     source={f.get('source_document', '?')}  conf={f.get('confidence', '?'):.2f}"
+        )
+    if not flagged:
+        lines.append("  (all findings flagged requires_human_review=True)")
+    lines.append("\nApprove? [y/n]: ")
+    return "\n".join(lines)
+
+
 def hitl_node(state: AgentState) -> dict[str, Any]:
     if not state["requires_human_review"]:
         logger.info("[hitl] auto-approved (confidence ok)")
         return {"human_approved": True}
     logger.info("[hitl] prompting human — low-confidence findings detected")
-    response = input(
-        f"\nLow-confidence findings require review.\nQuery: {state['query']}\nApprove? [y/n]: "
-    )
+    response = input(_format_hitl_prompt(state))
     approved = response.strip().lower() == "y"
     logger.info("[hitl] human decision: {}", "approved" if approved else "rejected")
     return {"human_approved": approved}
@@ -83,10 +105,7 @@ async def hitl_node_async(state: AgentState) -> dict[str, Any]:
         logger.info("[hitl] auto-approved (confidence ok)")
         return {"human_approved": True}
     logger.info("[hitl] prompting human — low-confidence findings detected")
-    response = await asyncio.to_thread(
-        input,
-        f"\nLow-confidence findings require review.\nQuery: {state['query']}\nApprove? [y/n]: ",
-    )
+    response = await asyncio.to_thread(input, _format_hitl_prompt(state))
     approved = response.strip().lower() == "y"
     logger.info("[hitl] human decision: {}", "approved" if approved else "rejected")
     return {"human_approved": approved}
